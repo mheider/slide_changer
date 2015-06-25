@@ -1,0 +1,139 @@
+#!/usr/bin/env ruby
+# -*- coding: utf-8 -*-
+
+require 'rubygems'
+require 'httparty'
+
+API_LOCATION = "http://mobileclassroom.inf.tu-dresden.de"
+
+class AmcsApi
+  include HTTParty
+  base_uri API_LOCATION
+  format :json
+
+  @@token = ''
+  @course_id = ''
+  @current_slide = 0
+
+
+  def initialize(username, password)
+    body = {
+      username: username,
+      password: password
+    }
+    response = AmcsApi.post('/api/auth/authenticate', body: body)
+    @@token =  response["token"]
+    unless @@token
+      raise Error.new("falsches Passwort!")
+    end
+    puts "Anmeldung erfolgreich!"
+    select_course
+    select_lecture
+    load_slides
+  end
+
+  def select_course
+    courses = AmcsApi.get_with_header('/api/courses')["courses"]
+    unless courses.kind_of?(Array)
+      courses = [courses]
+    end
+    puts "Waehlen sie einen Kurs:"
+    courses.each_with_index do |course, index| 
+      puts "#{index}) #{course["course"]["name"]}"
+    end
+    print 'Ihre Wahl: '
+    index = gets.chomp.to_i
+    @course_id =  courses[index]["course"]["id"]
+  end
+
+  def select_lecture
+    lectures = AmcsApi.get_with_header("/api/courses/#{@course_id}/lectures")["lectures"]
+    unless lectures.kind_of?(Array)
+      lectures = [lectures]
+    end
+    puts "Waehlen sie einen Vortrag:"
+    lectures.each_with_index do |lecture, index| 
+      puts "#{index}) #{lecture["lecture"]["name"]}"
+    end
+    print 'Ihre Wahl:'
+    index = gets.chomp.to_i
+    @lecture_id = lectures[index]["lecture"]["id"]
+  end
+
+  def load_slides
+    @slide_set_id = AmcsApi.get_with_header("/api/lectures/#{@lecture_id}")["lecture"]["active_slide_set"]["id"]
+    @slides = AmcsApi.get_with_header("/api/slide_sets/#{@slide_set_id}")["slide_set"]["slides"]
+  end
+
+  def slide_number(number)
+    @slides.each do |slide| 
+      if slide["position"] == number
+        set_slide_active(slide["id"])
+      end
+    end
+  end
+
+  def set_slide_active(slide_id)
+    AmcsApi.put_with_header("/api/slide_sets/#{@slide_set_id}/slides/#{slide_id}/active")
+    puts "Slide with id: #{slide_id} active"
+  end
+
+  def self.put_with_header(location)
+    AmcsApi.put(location, headers: { 'X-AMCS-API' => '2', 'Authorization' => @@token})
+  end
+
+  def self.get_with_header(location)
+    AmcsApi.get(location, headers: { 'X-AMCS-API' => '2', 'Authorization' => @@token})
+  end
+
+
+end
+
+
+@amcs_api = nil
+
+def startup
+  print "Nutzername: "
+  username = gets.chomp
+  print "Password: "
+  password = gets.chomp
+  @amcs_api = AmcsApi.new(username, password)
+end
+
+def exit_programm
+  Process.exit(0)
+end
+
+
+def read_input()
+  print "Ihre Auswahl: "
+  input = gets.chomp
+  case input
+  when "Q"
+    exit_programm
+  end
+
+  begin
+    input = input.to_i
+    @amcs_api.slide_number input
+  end
+
+  print_menu
+end
+
+
+
+def print_menu
+  puts "#### MENU ####"
+  puts "Sie haben folgende Möglichkeiten: "
+  puts "\tSlide Position angeben: [Number]"
+  puts "\tBeenden: [Q]"
+  read_input
+end
+
+
+if __FILE__ == $0
+  puts "Willkommen zum AMCS SlideChanger"
+  startup
+  print_menu
+end
